@@ -129,6 +129,25 @@
       direction: ltr;
     }
 
+    .shift-timer {
+      display: none;
+      text-align: center;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: rgba(34,211,238,0.08);
+      border: 1px solid rgba(34,211,238,0.3);
+      border-radius: 12px;
+    }
+    .shift-timer-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    .shift-timer-value {
+      font-family: Consolas, monospace;
+      font-size: 34px;
+      font-weight: 700;
+      direction: ltr;
+      background: linear-gradient(to left, var(--cyan), var(--indigo));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+
     /* BUTTONS */
     .btn {
       width: 100%;
@@ -252,8 +271,47 @@
     /* SELECTED INFO */
     .selected-date { font-size: 12px; color: var(--muted); text-align: center; margin-bottom: 10px; min-height: 18px; }
 
+    /* ── TABS ── */
+    body { padding-bottom: 80px; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .bottom-nav {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 64px;
+      background: #0d0d2b;
+      border-top: 1px solid rgba(99,102,241,0.35);
+      display: flex;
+      z-index: 100;
+      box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+    }
+
+    .tab-btn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: color 0.2s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .tab-btn .tab-icon { font-size: 22px; line-height: 1; }
+    .tab-btn.active { color: var(--cyan); }
+    .tab-btn.active .tab-icon { filter: drop-shadow(0 0 6px rgba(34,211,238,0.7)); }
+
     @media (min-width: 480px) {
-      body { padding: 20px; }
+      body { padding: 20px; padding-bottom: 80px; }
       .card { padding: 22px; }
     }
   </style>
@@ -267,6 +325,9 @@
     <div id="clock">00:00:00</div>
   </div>
 
+  <!-- TAB 1: היום -->
+  <div class="tab-panel active" id="tab-today">
+
   <!-- CLOCK IN/OUT CARD -->
   <div class="card">
     <div class="card-title">כניסה / יציאה</div>
@@ -276,9 +337,19 @@
       <div class="today-hours" id="today-display">היום: --:-- - --:--</div>
     </div>
 
+    <div class="shift-timer" id="shift-timer">
+      <div class="shift-timer-label">⏱ זמן במשמרת</div>
+      <div class="shift-timer-value" id="shift-timer-value">00:00:00</div>
+    </div>
+
     <button class="btn btn-in"  id="btn-in"  onclick="clockIn()">🟢  כניסה לעבודה</button>
     <button class="btn btn-out" id="btn-out" onclick="clockOut()" disabled>🔴  יציאה מהעבודה</button>
   </div>
+
+  </div> <!-- end tab-today -->
+
+  <!-- TAB 2: סטטיסטיקות -->
+  <div class="tab-panel" id="tab-stats">
 
   <!-- STATS CARD -->
   <div class="card">
@@ -321,6 +392,11 @@
       </div>
     </div>
   </div>
+
+  </div> <!-- end tab-stats -->
+
+  <!-- TAB 3: לוח חודשי -->
+  <div class="tab-panel" id="tab-history">
 
   <!-- EDIT DAY CARD -->
   <div class="card">
@@ -373,9 +449,32 @@
     </div>
   </div>
 
-</div>
+  </div> <!-- end tab-history -->
+
+</div> <!-- end container -->
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav">
+  <button class="tab-btn active" id="nav-today"   onclick="switchTab('today')">
+    <span class="tab-icon">🕐</span>היום
+  </button>
+  <button class="tab-btn"        id="nav-stats"   onclick="switchTab('stats')">
+    <span class="tab-icon">📊</span>סטטיסטיקות
+  </button>
+  <button class="tab-btn"        id="nav-history" onclick="switchTab('history')">
+    <span class="tab-icon">📅</span>לוח חודשי
+  </button>
+</nav>
 
 <script>
+  // ── Tabs ─────────────────────────────────────────────────────────
+  function switchTab(name) {
+    ['today','stats','history'].forEach(t => {
+      document.getElementById('tab-' + t).classList.toggle('active', t === name);
+      document.getElementById('nav-' + t).classList.toggle('active', t === name);
+    });
+  }
+
   // ── Data ─────────────────────────────────────────────────────────
   const STORAGE_KEY = 'workHoursData';
   const DAY_NAMES   = ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'];
@@ -385,6 +484,7 @@
   let viewYear, viewMonth;
   let currentMonth = [];
   let selectedIndex = -1;
+  let shiftStartTime = null;
 
   // ── Clock ─────────────────────────────────────────────────────────
   function updateClock() {
@@ -394,6 +494,19 @@
     const ss  = String(now.getSeconds()).padStart(2,'0');
     document.getElementById('clock').textContent = `${hh}:${mm}:${ss}`;
     updateTodayDisplay();
+    updateShiftTimer();
+  }
+
+  function updateShiftTimer() {
+    const timerEl = document.getElementById('shift-timer');
+    if (!shiftStartTime) { timerEl.style.display = 'none'; return; }
+    timerEl.style.display = 'block';
+    const elapsed = Math.max(0, Math.floor((Date.now() - shiftStartTime) / 1000));
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    document.getElementById('shift-timer-value').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
   }
 
   setInterval(updateClock, 1000);
@@ -465,6 +578,7 @@
     today.clockIn  = now;
     today.clockOut = null;
     today.status   = 'work';
+    shiftStartTime = Date.now();
     saveAndRefresh();
     updateTodayButtons();
   }
@@ -473,6 +587,7 @@
     const today = getTodayEntry();
     if (!today) return;
     today.clockOut = timeStr(new Date());
+    shiftStartTime = null;
     saveAndRefresh();
     updateTodayButtons();
   }
@@ -580,7 +695,7 @@
     const planned   = currentMonth.filter(d => d.status !== 'weekend');
     const target    = planned.length * 9;
     const worked    = currentMonth.reduce((s, d) => s + calcHours(d), 0);
-    const remain    = Math.max(0, target - worked);
+    const remain    = Math.max(0, Math.min(target, 182) - worked);
     const daysWorked= currentMonth.filter(d => calcHours(d) > 0).length;
     const avg       = daysWorked > 0 ? worked / daysWorked : 0;
     const pct       = target > 0 ? Math.min(100, (worked / target) * 100) : 0;
